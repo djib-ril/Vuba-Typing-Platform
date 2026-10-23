@@ -47,7 +47,12 @@ import MusicPlayer from "@/src/components/dashboard/MusicPlayer";
 export default function DashboardPage() {
   const router = useRouter();
   const { theme, toggleTheme } = useTheme();
-
+//Changed by Djibril
+  const [isMounted, setIsMounted] = useState(false);
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+//Changes end here
   const [activeTab, setActiveTab] = useState<
     "floor" | "lessons" | "stats" | "racing" | "leaderboard" | "notifications" | "admin"
   >("floor");
@@ -420,7 +425,11 @@ export default function DashboardPage() {
 
   const unreadNotifCount = notifications.filter((n) => !n.isRead).length;
   const isAdmin = userRole === "admin" || userEmail === ADMIN_EMAIL;
-
+//Changed by Djibril
+if (!isMounted) {
+    return null;
+  }
+//Changes end here
   const navItems = [
     { id: "floor", label: "The Typing Floor", icon: Keyboard, badge: "Max Screen" },
     { id: "lessons", label: "Typing Lessons", icon: BookOpen, badge: "Beginner → Pro" },
