@@ -1,26 +1,110 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-vuba-green-light: #10b981;
+  --color-vuba-green-neon: #34d399;
+  --color-vuba-green-dark: #064e3b;
+  --color-vuba-green-forest: #047857;
+  --color-vuba-yellow-muted: #eab308;
+  --color-vuba-yellow-soft: #fef08a;
+  --color-vuba-yellow-amber: #f59e0b;
+  --color-vuba-orange: #f97316;
+  --color-vuba-orange-dark: #ea580c;
+  --color-vuba-orange-light: #fb923c;
+  --color-vuba-dark-bg: #080d11;
+  --color-vuba-dark-surface: #0e161c;
+  --color-vuba-dark-card: #141f27;
+  --color-vuba-light-bg: #f8fafc;
+  --color-vuba-light-surface: #ffffff;
+  --color-vuba-light-card: #f1f5f9;
+}
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f8fafc;
+  --foreground: #0f172a;
+  --card-bg: #ffffff;
+  --card-border: #e2e8f0;
+  --muted-text: #64748b;
+  --brand-green: #047857;
+  --brand-yellow: #ca8a04;
+  --brand-orange: #ea580c;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+.dark {
+  --background: #070c0f;
+  --foreground: #f1f5f9;
+  --card-bg: #0e171e;
+  --card-border: #1e2c38;
+  --muted-text: #94a3b8;
+  --brand-green: #10b981;
+  --brand-yellow: #facc15;
+  --brand-orange: #f97316;
 }
 
 body {
-  background: var(--background);
+  background-color: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  transition: background-color 0.3s ease, color 0.3s ease;
+  overflow-x: hidden;
+}
+
+/* Glassmorphism helpers */
+.glass-nav {
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+/* Uneven organic curved border for Djibril Mugisha About section */
+.uneven-curved-frame {
+  border-radius: 63% 37% 54% 46% / 44% 59% 41% 56%;
+  animation: morphBlob 12s ease-in-out infinite alternate;
+  transition: all 0.5s ease-in-out;
+}
+
+@keyframes morphBlob {
+  0% {
+    border-radius: 63% 37% 54% 46% / 44% 59% 41% 56%;
+  }
+  33% {
+    border-radius: 41% 59% 42% 58% / 58% 34% 66% 42%;
+  }
+  66% {
+    border-radius: 54% 46% 67% 33% / 37% 63% 37% 63%;
+  }
+  100% {
+    border-radius: 63% 37% 54% 46% / 44% 59% 41% 56%;
+  }
+}
+
+/* Glow effects */
+.glow-green {
+  box-shadow: 0 0 25px -5px rgba(16, 185, 129, 0.4);
+}
+
+.glow-yellow {
+  box-shadow: 0 0 25px -5px rgba(234, 179, 8, 0.4);
+}
+
+.glow-orange {
+  box-shadow: 0 0 25px -5px rgba(249, 115, 22, 0.4);
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.3);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(16, 185, 129, 0.6);
 }

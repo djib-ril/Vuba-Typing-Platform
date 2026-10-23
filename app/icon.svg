@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#070c0f"/>
+      <stop offset="100%" stop-color="#064e3b"/>
+    </linearGradient>
+    <linearGradient id="tColor" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#34d399"/>
+    </linearGradient>
+    <linearGradient id="flashColor" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fef08a"/>
+      <stop offset="45%" stop-color="#facc15"/>
+      <stop offset="100%" stop-color="#f97316"/>
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="1.5" stdDeviation="1.5" flood-color="#000000" flood-opacity="0.7"/>
+    </filter>
+  </defs>
+  <!-- Background Rounded Square -->
+  <rect width="64" height="64" rx="15" fill="url(#bg)"/>
+  <rect x="1.5" y="1.5" width="61" height="61" rx="13.5" fill="none" stroke="#10b981" stroke-width="1.8" stroke-opacity="0.5"/>
+  
+  <!-- Letter T -->
+  <path d="M 10 17 H 34 V 24.5 H 26 V 47 H 18 V 24.5 H 10 Z" fill="url(#tColor)" filter="url(#glow)"/>
+  
+  <!-- Flash (Lightning bolt) -->
+  <polygon points="45,14 34,30 42.5,30 37,50 52,26 43.5,26" fill="url(#flashColor)" filter="url(#glow)"/>
+</svg>
