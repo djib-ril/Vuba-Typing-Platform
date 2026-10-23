@@ -582,7 +582,7 @@ export default function AdminPanel({ onSendMessage, onRoleChange }: AdminPanelPr
                           />
                         ) : (
                           <span className="font-black text-xs text-zinc-500">
-                            {post.name.charAt(0).toUpperCase()}
+                            {post?.name?.charAt(0)?.toUpperCase() ?? "U"}
                           </span>
                         )}
                       </div>
