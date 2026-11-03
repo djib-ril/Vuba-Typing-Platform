@@ -44,9 +44,18 @@ const DEFAULT_ADMIN_USERS: AdminUser[] = [
 interface AdminPanelProps {
   onSendMessage: (targetUser: string, message: string) => void;
   onRoleChange?: (userId: string, newRole: "user" | "moderator" | "admin") => void;
+  currentUserId?: string;
+  currentUserName?: string;
+  currentUserEmail?: string;
 }
 
-export default function AdminPanel({ onSendMessage, onRoleChange }: AdminPanelProps) {
+export default function AdminPanel({
+  onSendMessage,
+  onRoleChange,
+  currentUserId,
+  currentUserName = "Admin",
+  currentUserEmail,
+}: AdminPanelProps) {
   const [users, setUsers] = useState<AdminUser[]>(DEFAULT_ADMIN_USERS);
   const [selectedUserEmail, setSelectedUserEmail] = useState<string>(ADMIN_EMAIL);
   const [notificationMsg, setNotificationMsg] = useState("");
@@ -261,11 +270,13 @@ export default function AdminPanel({ onSendMessage, onRoleChange }: AdminPanelPr
     }
 
     const { data: authData } = await supabase.auth.getUser();
+    const adminSenderName = `Admin (${currentUserName || "Admin"})`;
 
     const { error } = await supabase.from("notifications").insert({
       user_id: target.id,
-      sender_id: authData?.user?.id || null,
-      title: "Direct Admin Directive",
+      sender_id: currentUserId || authData?.user?.id || null,
+      sender_name: adminSenderName,
+      title: `Direct Admin Directive from ${currentUserName || "Admin"}`,
       message: notificationMsg,
       is_read: false,
     });
@@ -296,7 +307,7 @@ export default function AdminPanel({ onSendMessage, onRoleChange }: AdminPanelPr
             Account Management & Direct Messaging
           </h2>
           <p className="text-xs text-zinc-300">
-            Authorized administrator: <code>{ADMIN_EMAIL}</code>
+            Acting administrator: <strong>{currentUserName || "Admin"}</strong> ({currentUserEmail || ADMIN_EMAIL})
           </p>
         </div>
       </div>

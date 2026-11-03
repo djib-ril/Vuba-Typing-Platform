@@ -23,6 +23,9 @@ import {
   Maximize2,
   CheckCircle,
   BookOpen,
+  Bot,
+  Mail,
+  AlertCircle,
 } from "lucide-react";
 import {
   supabase,
@@ -54,12 +57,29 @@ export default function DashboardPage() {
   }, []);
 //Changes end here
   const [activeTab, setActiveTab] = useState<
-    "floor" | "lessons" | "stats" | "racing" | "leaderboard" | "notifications" | "admin"
+    | "floor"
+    | "lessons"
+    | "stats"
+    | "racing"
+    | "leaderboard"
+    | "notifications"
+    | "admin"
+    | "coach"
   >("floor");
 
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [isCoachOpen, setIsCoachOpen] = useState(false);
   const [showTop3Modal, setShowTop3Modal] = useState(false);
+
+  // Unread messages center popup on initial sign in
+  const [showUnreadPopup, setShowUnreadPopup] = useState(false);
+  const [hasShownUnreadPopup, setHasShownUnreadPopup] = useState(false);
+
+  // Top 3 qualification state
+  const [top3UnqualifiedNotice, setTop3UnqualifiedNotice] = useState<{
+    userSpeed: number;
+    top3: { name: string; wpm: number; rank: number }[];
+  } | null>(null);
 
   // User state
   const [userId, setUserId] = useState<string>("guest");
@@ -113,23 +133,46 @@ export default function DashboardPage() {
       .select("*")
       .eq("user_id", uid)
       .order("created_at", { ascending: false })
-      .limit(20);
+      .limit(30);
 
     if (data) {
-      const serverNotes: DashboardNotification[] = data.map((n: any) => ({
-        id: n.id,
-        sender: "Admin (Djibril Mugisha)",
-        title: n.title || "Direct Admin Directive",
-        message: n.message,
-        type: "admin" as const,
-        isRead: !!n.is_read,
-        date: new Date(n.created_at).toLocaleDateString(),
-      }));
+      const serverNotes: DashboardNotification[] = data.map((n: any) => {
+        let senderName = n.sender_name;
+        if (!senderName) {
+          if (n.title && n.title.includes("from ")) {
+            senderName = n.title.replace(/^.*from\s+/i, "");
+          } else {
+            senderName = "Admin";
+          }
+        }
+        return {
+          id: n.id,
+          sender: senderName,
+          title: n.title || "Message",
+          message: n.message,
+          type: "admin" as const,
+          isRead: !!n.is_read,
+          date: new Date(n.created_at).toLocaleDateString(),
+        };
+      });
+
       setNotifications((prev) => {
         const localOnly = prev.filter(
           (p) => !serverNotes.some((s) => s.id === p.id)
         );
         return [...serverNotes, ...localOnly];
+      });
+
+      // Show unread messages popup on immediate sign-in
+      setHasShownUnreadPopup((alreadyShown) => {
+        if (!alreadyShown) {
+          const unread = serverNotes.filter((n) => !n.isRead);
+          if (unread.length > 0) {
+            setShowUnreadPopup(true);
+            return true;
+          }
+        }
+        return alreadyShown;
       });
     }
   }, []);
@@ -338,10 +381,22 @@ export default function DashboardPage() {
     }
   };
 
+  const handleMarkAllRead = async () => {
+    if (userId && userId !== "guest") {
+      await supabase
+        .from("notifications")
+        .update({ is_read: true })
+        .eq("user_id", userId)
+        .eq("is_read", false);
+    }
+    setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+    setShowUnreadPopup(false);
+  };
+
   const handleAdminSendMessage = (targetUser: string, message: string) => {
     const newNotif: DashboardNotification = {
       id: `admin-${Date.now()}`,
-      sender: "Admin (Djibril Mugisha)",
+      sender: `Admin (${userName})`,
       title: "Direct Admin Directive",
       message: message,
       type: "admin",
@@ -369,9 +424,35 @@ export default function DashboardPage() {
 
     const speed = highestWpm > 0 ? highestWpm : 120;
     const accuracyVal = avgAccuracy > 0 ? avgAccuracy : 99.2;
+    setTop3UnqualifiedNotice(null);
 
-    // Publish to Supabase (landing page reads it from there)
+    // 1. Enforce Top 3 Qualification Rule: Check against current podium performers
     try {
+      const { data: currentTop } = await supabase
+        .from("top_performers")
+        .select("*")
+        .order("wpm", { ascending: false });
+
+      const otherPerformers = (currentTop || []).filter(
+        (p: any) => p.user_id !== userId
+      );
+
+      if (
+        otherPerformers.length >= 3 &&
+        otherPerformers.every((p: any) => (Number(p.wpm) || 0) >= speed)
+      ) {
+        setTop3UnqualifiedNotice({
+          userSpeed: speed,
+          top3: otherPerformers.slice(0, 3).map((p: any, idx: number) => ({
+            name: p.name || `Top Typist #${idx + 1}`,
+            wpm: Number(p.wpm) || 0,
+            rank: idx + 1,
+          })),
+        });
+        return;
+      }
+
+      // 2. Publish or update in Supabase
       if (userId && userId !== "guest") {
         const { data: existing } = await supabase
           .from("top_performers")
@@ -406,6 +487,19 @@ export default function DashboardPage() {
           });
           if (error) throw error;
         }
+
+        // Trim excess to strictly 3 max
+        const { data: allPerformers } = await supabase
+          .from("top_performers")
+          .select("*")
+          .order("wpm", { ascending: false });
+
+        if (allPerformers && allPerformers.length > 3) {
+          const excessIds = allPerformers.slice(3).map((p: any) => p.id);
+          if (excessIds.length > 0) {
+            await supabase.from("top_performers").delete().in("id", excessIds);
+          }
+        }
       }
     } catch {
       setErrorBanner(
@@ -420,6 +514,7 @@ export default function DashboardPage() {
       setTop3SubmittedSuccess(false);
       setShowTop3Modal(false);
       setTop3Advice("");
+      setTop3UnqualifiedNotice(null);
     }, 1500);
   };
 
@@ -433,6 +528,7 @@ if (!isMounted) {
   const navItems = [
     { id: "floor", label: "The Typing Floor", icon: Keyboard, badge: "Max Screen" },
     { id: "lessons", label: "Typing Lessons", icon: BookOpen, badge: "Beginner → Pro" },
+    { id: "coach", label: "AI Typing Coach", icon: Sparkles, badge: "Master AI" },
     { id: "stats", label: "Analytics & Stats", icon: BarChart3 },
     { id: "racing", label: "Multiplayer Race", icon: Users },
     { id: "leaderboard", label: "Leaderboard", icon: Trophy },
@@ -703,11 +799,119 @@ if (!isMounted) {
 
           {activeTab === "leaderboard" && <LeaderboardView />}
 
+          {activeTab === "coach" && (
+            <div className="space-y-6">
+              <div className="p-6 rounded-3xl bg-gradient-to-r from-amber-500/20 via-zinc-900 to-[#121c24] border border-amber-400/30 text-white flex flex-col md:flex-row items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-400/20 text-amber-300 text-xs font-bold uppercase tracking-wider border border-amber-400/30">
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Personalized Biomechanical AI Coach</span>
+                  </span>
+                  <h2 className="text-xl sm:text-2xl font-black">
+                    Interactive Typing Speed & Technique Master
+                  </h2>
+                  <p className="text-xs text-zinc-300 max-w-xl">
+                    Get instantaneous feedback on breaking speed plateaus, floating wrist posture, home-row anchor points, and mechanical switch performance tailored to your metrics.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setIsCoachOpen(true)}
+                  className="px-5 py-3 rounded-2xl bg-amber-400 hover:bg-amber-300 text-zinc-950 font-black text-xs shadow-lg shadow-amber-400/20 transition-all flex items-center gap-2 cursor-pointer flex-shrink-0"
+                >
+                  <Bot className="w-4 h-4" />
+                  <span>Launch Floating Widget</span>
+                </button>
+              </div>
+
+              {/* Master AI Coaching Curated Modules & Live Q&A */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="md:col-span-1 p-6 rounded-3xl bg-white dark:bg-[#0c141a] border border-zinc-200 dark:border-zinc-800 space-y-4">
+                  <h3 className="font-bold text-sm text-zinc-900 dark:text-white flex items-center gap-2">
+                    <BookOpen className="w-4 h-4 text-emerald-500" />
+                    <span>Core Drill Topics</span>
+                  </h3>
+                  <div className="space-y-2">
+                    {[
+                      { title: "Breaking Past 80 WPM", query: "How do I break through the 80 WPM speed plateau?" },
+                      { title: "Home Row Anchor Nubs", query: "What is the optimal finger placement on the home row?" },
+                      { title: "The 98% Accuracy Rule", query: "How much does a backspace error penalize my net WPM?" },
+                      { title: "Switch Types & Latency", query: "Which keyboard switches are best for typing speed?" },
+                      { title: "Wrist Fatigue & Ergonomics", query: "How can I prevent wrist fatigue and tendon pain while typing?" },
+                      { title: "Code Syntax Touch Typing", query: "How do I learn touch typing on the number row and coding symbols?" },
+                    ].map((topic, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => {
+                          setIsCoachOpen(true);
+                        }}
+                        className="w-full text-left p-3 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 hover:bg-amber-400/10 hover:border-amber-400/30 border border-zinc-200/80 dark:border-zinc-800 text-xs font-semibold text-zinc-800 dark:text-zinc-200 transition-all cursor-pointer flex items-center justify-between"
+                      >
+                        <span>{topic.title}</span>
+                        <span className="text-amber-500 font-bold">Ask →</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="md:col-span-2 p-6 rounded-3xl bg-white dark:bg-[#0c141a] border border-zinc-200 dark:border-zinc-800 space-y-4 flex flex-col justify-between">
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-bold text-sm text-zinc-900 dark:text-white flex items-center gap-2">
+                        <Bot className="w-4 h-4 text-amber-500" />
+                        <span>Real-Time Biomechanical Analysis</span>
+                      </h3>
+                      <span className="text-[11px] font-bold text-emerald-500 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20">
+                        Live Engine Connected
+                      </span>
+                    </div>
+
+                    <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-zinc-800 text-xs leading-relaxed text-zinc-700 dark:text-zinc-300 space-y-2">
+                      <p className="font-bold text-zinc-900 dark:text-white">
+                        Your Personalized Prescription based on {testsCount} tests recorded:
+                      </p>
+                      <ul className="list-disc list-inside space-y-1 text-zinc-600 dark:text-zinc-400">
+                        <li>
+                          Current Peak: <strong>{highestWpm} WPM</strong> | Average: <strong>{avgWpm} WPM</strong>
+                        </li>
+                        <li>
+                          Accuracy baseline: <strong>{avgAccuracy}%</strong>. Keep error recovery under 300ms by floating wrists.
+                        </li>
+                        <li>
+                          Recommended next drill: Practice word chunking with high-frequency n-grams on The Typing Floor.
+                        </li>
+                      </ul>
+                    </div>
+                  </div>
+
+                  <div className="pt-4 border-t border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-3">
+                    <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                      Click below to chat freely with the AI Coach in full screen or compact view:
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setIsCoachOpen(true)}
+                      className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md shadow-emerald-600/20 cursor-pointer flex items-center gap-1.5"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Open Full AI Chat</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {activeTab === "notifications" && (
             <NotificationCenter
               notifications={notifications}
               onMarkRead={handleMarkNotificationRead}
               onOpenTop3Form={() => setShowTop3Modal(true)}
+              currentUserId={userId}
+              currentUserName={userName}
+              onRefreshNotifications={() => userId && loadNotifications(userId)}
             />
           )}
 
@@ -715,6 +919,9 @@ if (!isMounted) {
             <AdminPanel
               onSendMessage={handleAdminSendMessage}
               onRoleChange={handleRoleChange}
+              currentUserId={userId}
+              currentUserName={userName}
+              currentUserEmail={userEmail}
             />
           )}
         </main>
@@ -754,6 +961,37 @@ if (!isMounted) {
             <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-4">
               Submit your typing advice. Once published, your words of wisdom will appear immediately on the global landing page!
             </p>
+
+            {top3UnqualifiedNotice && (
+              <div className="mb-4 p-4 rounded-2xl bg-amber-500/10 border-2 border-amber-400/40 text-xs space-y-3 animate-fadeIn">
+                <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400 font-black">
+                  <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                  <span>Podium Full: Higher Speeds Required</span>
+                </div>
+                <p className="text-zinc-700 dark:text-zinc-300 leading-relaxed">
+                  There are currently <strong>three people with higher WPM</strong> than your speed (<strong>{top3UnqualifiedNotice.userSpeed} WPM</strong>) on the podium:
+                </p>
+                <div className="space-y-1.5 p-3 rounded-xl bg-white dark:bg-black/50 border border-zinc-200 dark:border-zinc-800">
+                  {top3UnqualifiedNotice.top3.map((tp) => (
+                    <div
+                      key={tp.rank}
+                      className="flex items-center justify-between font-bold text-zinc-900 dark:text-white"
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <span className="text-amber-500 font-mono">#{tp.rank}</span>
+                        <span>{tp.name}</span>
+                      </span>
+                      <span className="text-emerald-500 font-mono font-black">
+                        {tp.wpm} WPM
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[11px] text-zinc-600 dark:text-zinc-400 leading-relaxed">
+                  ⚡ You must exceed these speeds to be posted on "Who's The Best". Go to The Floor, set a new personal speed record, and try again!
+                </p>
+              </div>
+            )}
 
             {top3SubmittedSuccess ? (
               <div className="py-8 text-center space-y-3">
@@ -823,6 +1061,88 @@ if (!isMounted) {
                 </div>
               </form>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Centered Unread Messages Pop-up on Immediate Sign-In */}
+      {showUnreadPopup && notifications.filter((n) => !n.isRead).length > 0 && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md animate-fadeIn">
+          <div className="relative w-full max-w-lg p-6 sm:p-8 rounded-3xl bg-white dark:bg-[#0c141a] border border-zinc-200 dark:border-zinc-700 shadow-2xl space-y-5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-500 flex items-center justify-center shadow-md">
+                  <Mail className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-lg text-zinc-900 dark:text-white flex items-center gap-2">
+                    <span>Unread Messages</span>
+                    <span className="px-2 py-0.5 rounded-full text-xs font-black bg-emerald-500 text-white font-mono">
+                      {notifications.filter((n) => !n.isRead).length}
+                    </span>
+                  </h3>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                    You received new communications while away.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowUnreadPopup(false)}
+                className="text-zinc-400 hover:text-zinc-600 dark:hover:text-white font-bold text-sm cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Scrollable list of unread messages */}
+            <div className="max-h-64 overflow-y-auto space-y-3 pr-1">
+              {notifications
+                .filter((n) => !n.isRead)
+                .map((notif) => (
+                  <div
+                    key={notif.id}
+                    className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/70 border border-zinc-200 dark:border-zinc-800 space-y-1"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-xs text-zinc-900 dark:text-white">
+                        {notif.title}
+                      </span>
+                      <span className="text-[10px] text-zinc-400 font-medium">
+                        {notif.date}
+                      </span>
+                    </div>
+                    <p className="text-xs text-zinc-700 dark:text-zinc-300 leading-relaxed">
+                      {notif.message}
+                    </p>
+                    <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold pt-1">
+                      From {notif.sender}
+                    </div>
+                  </div>
+                ))}
+            </div>
+
+            {/* Actions */}
+            <div className="flex flex-wrap items-center justify-end gap-2.5 pt-2 border-t border-zinc-200 dark:border-zinc-800">
+              <button
+                type="button"
+                onClick={handleMarkAllRead}
+                className="px-4 py-2.5 rounded-xl text-xs font-semibold text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+              >
+                Mark All as Read
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab("notifications");
+                  setShowUnreadPopup(false);
+                }}
+                className="px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 shadow-md shadow-emerald-600/20 transition-all cursor-pointer"
+              >
+                Go to Messages Inbox →
+              </button>
+            </div>
           </div>
         </div>
       )}

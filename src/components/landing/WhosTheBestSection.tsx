@@ -27,6 +27,12 @@ export default function WhosTheBestSection() {
   const [submitError, setSubmitError] = useState("");
   const [isAdminUser, setIsAdminUser] = useState(false);
 
+  // Qualification Notice when 3 faster typists already occupy the podium
+  const [unqualifiedNotice, setUnqualifiedNotice] = useState<{
+    userSpeed: number;
+    top3: { name: string; wpm: number; rank: number }[];
+  } | null>(null);
+
   // Form modal state
   const [showSubmitModal, setShowSubmitModal] = useState(false);
   const [formSubmitted, setFormSubmitted] = useState(false);
@@ -41,8 +47,7 @@ export default function WhosTheBestSection() {
       const { data, error } = await supabase
         .from("top_performers")
         .select("*")
-        .order("rank_position", { ascending: true })
-        .limit(3);
+        .order("wpm", { ascending: false });
 
       if (!error && data && data.length > 0) {
         // Query latest highest WPM from test_results to guarantee Who's The Best matches the user's dashboard!
@@ -61,23 +66,32 @@ export default function WhosTheBestSection() {
           });
         }
 
-        const synced = data.map((p: any) => {
-          const realBest = p.user_id ? bestWpmMap[p.user_id] : null;
-          const currentWpm = realBest && realBest > 0 ? realBest : (p.wpm || 120);
-          const level =
-            currentWpm >= 140
-              ? "Grandmaster"
-              : currentWpm >= 110
-              ? "Pro"
-              : currentWpm >= 80
-              ? "Advanced"
-              : "Intermediate";
+        // Cross-reference real best speeds and sort strictly in descending order
+        const synced = data
+          .map((p: any) => {
+            const realBest = p.user_id ? bestWpmMap[p.user_id] : null;
+            const currentWpm = realBest && realBest > 0 ? realBest : (Number(p.wpm) || 120);
+            const level =
+              currentWpm >= 140
+                ? "Grandmaster"
+                : currentWpm >= 110
+                ? "Pro"
+                : currentWpm >= 80
+                ? "Advanced"
+                : "Intermediate";
 
-          return {
-            ...p,
-            wpm: currentWpm,
-            typing_level: p.typing_level || level,
-          };
+            return {
+              ...p,
+              wpm: currentWpm,
+              typing_level: p.typing_level || level,
+            };
+          })
+          .sort((a, b) => b.wpm - a.wpm)
+          .slice(0, 3); // STRICTLY 3 PEOPLE ONLY
+
+        // Rank well: 1st (highest WPM), 2nd (second highest), 3rd (third highest)
+        synced.forEach((p, idx) => {
+          p.rank_position = (idx + 1) as 1 | 2 | 3;
         });
 
         setPerformers(synced);
@@ -145,43 +159,113 @@ export default function WhosTheBestSection() {
     e.preventDefault();
     if (!nameInput.trim() || !adviceInput.trim()) return;
 
-    const nextRank = (Math.min(3, performers.length + 1) as 1 | 2 | 3);
-    const speed = parseFloat(wpmInput) || 125.0;
-
+    const speed = parseFloat(wpmInput) || 120.0;
     setSubmitError("");
+    setUnqualifiedNotice(null);
+
     const { data: authData } = await supabase.auth.getUser();
     const currentUserId = authData?.user?.id || null;
 
-    const { error } = await supabase.from("top_performers").insert({
-      user_id: currentUserId,
-      name: nameInput.trim(),
-      rank_position: nextRank,
-      wpm: speed,
-      accuracy: 99.4,
-      typing_level:
-        speed >= 140 ? "Grandmaster" : speed >= 110 ? "Pro" : "Advanced",
-      advice_message: adviceInput.trim(),
-      custom_avatar_url: avatarUrlInput.trim() || null,
-    });
+    // Check against current podium performers
+    // If 3 people with higher WPM already occupy the podium, reject with informative message
+    const otherPerformers = performers.filter(
+      (p) => !currentUserId || p.user_id !== currentUserId
+    );
 
-    if (error) {
-      setSubmitError(
-        "Could not publish your submission. Make sure you are signed in, then try again."
-      );
+    if (
+      otherPerformers.length >= 3 &&
+      otherPerformers.every((p) => (Number(p.wpm) || 0) >= speed)
+    ) {
+      setUnqualifiedNotice({
+        userSpeed: speed,
+        top3: otherPerformers.slice(0, 3).map((p, idx) => ({
+          name: p.name || `Top Typist #${idx + 1}`,
+          wpm: Number(p.wpm) || 0,
+          rank: idx + 1,
+        })),
+      });
       return;
     }
 
-    // Re-read the podium from the server so it shows the real published state
-    await loadTopPerformers();
+    try {
+      if (currentUserId) {
+        const { data: existing } = await supabase
+          .from("top_performers")
+          .select("id")
+          .eq("user_id", currentUserId)
+          .maybeSingle();
 
-    setFormSubmitted(true);
-    setTimeout(() => {
-      setFormSubmitted(false);
-      setShowSubmitModal(false);
-      setNameInput("");
-      setAdviceInput("");
-      setAvatarUrlInput("");
-    }, 1500);
+        if (existing) {
+          const { error: updateErr } = await supabase
+            .from("top_performers")
+            .update({
+              name: nameInput.trim(),
+              wpm: speed,
+              accuracy: 99.4,
+              typing_level:
+                speed >= 140 ? "Grandmaster" : speed >= 110 ? "Pro" : "Advanced",
+              advice_message: adviceInput.trim(),
+              custom_avatar_url: avatarUrlInput.trim() || null,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", existing.id);
+          if (updateErr) throw updateErr;
+        } else {
+          const { error: insertErr } = await supabase.from("top_performers").insert({
+            user_id: currentUserId,
+            name: nameInput.trim(),
+            rank_position: 1,
+            wpm: speed,
+            accuracy: 99.4,
+            typing_level:
+              speed >= 140 ? "Grandmaster" : speed >= 110 ? "Pro" : "Advanced",
+            advice_message: adviceInput.trim(),
+            custom_avatar_url: avatarUrlInput.trim() || null,
+          });
+          if (insertErr) throw insertErr;
+        }
+      } else {
+        const { error: insertErr } = await supabase.from("top_performers").insert({
+          user_id: null,
+          name: nameInput.trim(),
+          rank_position: 1,
+          wpm: speed,
+          accuracy: 99.4,
+          typing_level:
+            speed >= 140 ? "Grandmaster" : speed >= 110 ? "Pro" : "Advanced",
+          advice_message: adviceInput.trim(),
+          custom_avatar_url: avatarUrlInput.trim() || null,
+        });
+        if (insertErr) throw insertErr;
+      }
+
+      // Enforce strictly 3 top performers max
+      const { data: allPerformers } = await supabase
+        .from("top_performers")
+        .select("*")
+        .order("wpm", { ascending: false });
+
+      if (allPerformers && allPerformers.length > 3) {
+        const excessIds = allPerformers.slice(3).map((p: any) => p.id);
+        if (excessIds.length > 0) {
+          await supabase.from("top_performers").delete().in("id", excessIds);
+        }
+      }
+
+      await loadTopPerformers();
+
+      setFormSubmitted(true);
+      setTimeout(() => {
+        setFormSubmitted(false);
+        setShowSubmitModal(false);
+        setNameInput("");
+        setAdviceInput("");
+        setAvatarUrlInput("");
+        setUnqualifiedNotice(null);
+      }, 1500);
+    } catch (err: any) {
+      setSubmitError(err.message || "Could not publish your submission.");
+    }
   };
 
   const hasPerformers = performers.length > 0;
@@ -484,6 +568,37 @@ export default function WhosTheBestSection() {
             <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-4">
               Submit your name and typing philosophy. Once submitted, your profile will immediately appear on the landing page showcase!
             </p>
+
+            {unqualifiedNotice && (
+              <div className="mb-4 p-4 rounded-2xl bg-amber-500/10 border-2 border-amber-400/40 text-xs space-y-3 animate-fadeIn">
+                <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400 font-black">
+                  <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                  <span>Podium Full: Higher Speeds Required</span>
+                </div>
+                <p className="text-zinc-700 dark:text-zinc-300 leading-relaxed">
+                  There are currently <strong>three people with higher WPM</strong> than your speed (<strong>{unqualifiedNotice.userSpeed} WPM</strong>) on the podium:
+                </p>
+                <div className="space-y-1.5 p-3 rounded-xl bg-white dark:bg-black/50 border border-zinc-200 dark:border-zinc-800">
+                  {unqualifiedNotice.top3.map((tp) => (
+                    <div
+                      key={tp.rank}
+                      className="flex items-center justify-between font-bold text-zinc-900 dark:text-white"
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <span className="text-amber-500 font-mono">#{tp.rank}</span>
+                        <span>{tp.name}</span>
+                      </span>
+                      <span className="text-emerald-500 font-mono font-black">
+                        {tp.wpm} WPM
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[11px] text-zinc-600 dark:text-zinc-400 leading-relaxed">
+                  ⚡ You must exceed these speeds to claim a spot on the "Who's The Best" podium. Go to The Floor, set a new personal speed record, and try again!
+                </p>
+              </div>
+            )}
 
             {submitError && (
               <div className="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 text-xs flex items-center gap-2">

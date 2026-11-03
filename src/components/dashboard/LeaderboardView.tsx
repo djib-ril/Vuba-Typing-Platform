@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { Trophy, Medal, Crown, Zap, Flame, Filter, Search, User } from "lucide-react";
+import { Trophy, Medal, Crown, Zap, Flame, Filter, Search, User, Clock } from "lucide-react";
 import { supabase } from "@/src/lib/supabase";
 
 export interface LeaderboardEntry {
@@ -12,6 +12,7 @@ export interface LeaderboardEntry {
   level: "Grandmaster" | "Pro" | "Advanced" | "Intermediate" | "Beginner";
   wpm: number;
   accuracy: number;
+  durationSeconds: number;
   racesWon: number;
 }
 
@@ -36,9 +37,8 @@ export default function LeaderboardView() {
       const [{ data: results, error }, { data: profiles }] = await Promise.all([
         supabase
           .from("test_results")
-          .select("id, user_id, wpm, accuracy")
-          .order("wpm", { ascending: false })
-          .limit(200),
+          .select("id, user_id, wpm, accuracy, test_duration, test_mode, created_at")
+          .order("wpm", { ascending: false }),
         supabase.from("profiles").select("id, full_name, email, avatar_url"),
       ]);
 
@@ -49,10 +49,15 @@ export default function LeaderboardView() {
         profileMap[p.id] = p;
       });
 
-      // Results arrive sorted by wpm desc, so the first hit per user is best
+      // Keep each user's single best test result (highest WPM), ensuring all users who took tests appear
       const bestByUser: Record<string, any> = {};
       (results || []).forEach((r: any) => {
-        if (!bestByUser[r.user_id]) bestByUser[r.user_id] = r;
+        if (!r.user_id) return;
+        const currentBest = bestByUser[r.user_id];
+        const wpmVal = Number(r.wpm) || 0;
+        if (!currentBest || wpmVal > (Number(currentBest.wpm) || 0)) {
+          bestByUser[r.user_id] = r;
+        }
       });
 
       const levelFor = (wpm: number): LeaderboardEntry["level"] =>
@@ -69,14 +74,23 @@ export default function LeaderboardView() {
       const entries: LeaderboardEntry[] = Object.values(bestByUser)
         .map((r: any) => {
           const profile = profileMap[r.user_id] || {};
+          const duration =
+            Number(r.test_duration) ||
+            parseInt(r.test_mode || "30", 10) ||
+            30;
+
           return {
             id: r.id,
             rank: 0,
-            name: profile.full_name || profile.email?.split("@")[0] || "Typist",
+            name:
+              profile.full_name ||
+              profile.email?.split("@")[0] ||
+              `Typist (${r.user_id.slice(0, 6)})`,
             avatar: profile.avatar_url || null,
             level: levelFor(Number(r.wpm) || 0),
             wpm: Number(r.wpm) || 0,
             accuracy: Math.round(Number(r.accuracy) || 0),
+            durationSeconds: duration,
             racesWon: 0,
           };
         })
@@ -96,6 +110,20 @@ export default function LeaderboardView() {
 
   useEffect(() => {
     loadLeaderboard();
+
+    // Subscribe to test_results live so any completed test immediately updates the leaderboard
+    const channel = supabase
+      .channel("leaderboard-live-channel")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "test_results" },
+        () => loadLeaderboard()
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const filteredUsers = users.filter((user) => {
@@ -179,6 +207,7 @@ export default function LeaderboardView() {
                   <th className="py-3.5 px-4">Typist</th>
                   <th className="py-3.5 px-4">Level Tier</th>
                   <th className="py-3.5 px-4">Speed</th>
+                  <th className="py-3.5 px-4">Duration</th>
                   <th className="py-3.5 px-4">Accuracy</th>
                   <th className="py-3.5 px-4 text-right">Status</th>
                 </tr>
@@ -256,6 +285,14 @@ export default function LeaderboardView() {
                         <span className="text-[10px] text-zinc-400 font-normal">
                           WPM
                         </span>
+                      </div>
+                    </td>
+
+                    {/* Test Duration in Seconds */}
+                    <td className="py-3 px-4">
+                      <div className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md bg-amber-400/10 border border-amber-400/30 text-[11px] font-mono font-bold text-amber-600 dark:text-amber-400">
+                        <Clock className="w-3 h-3 text-amber-500" />
+                        <span>{user.durationSeconds}s</span>
                       </div>
                     </td>
 

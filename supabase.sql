@@ -77,6 +77,7 @@ CREATE TABLE IF NOT EXISTS public.notifications (
   created_at timestamptz DEFAULT now()
 );
 
+ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS sender_name text;
 ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS title text DEFAULT 'Direct Admin Directive';
 ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS message text;
 ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS is_read boolean DEFAULT false;

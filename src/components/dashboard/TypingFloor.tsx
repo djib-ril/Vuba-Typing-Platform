@@ -39,6 +39,7 @@ export default function TypingFloor({
 }: TypingFloorProps) {
   const [category, setCategory] = useState<TextCategory>("digital_literacy");
   const [durationSeconds, setDurationSeconds] = useState<number>(30);
+  const [customSecInput, setCustomSecInput] = useState<string>("");
   const [remainingSeconds, setRemainingSeconds] = useState<number>(30);
 
   const [words, setWords] = useState<string[]>([]);
@@ -379,20 +380,21 @@ export default function TypingFloor({
           ))}
         </div>
 
-        {/* Seconds Duration Selector: 15s, 30s, 60s, 120s */}
-        <div className="flex items-center gap-1 text-xs font-bold text-zinc-500 dark:text-zinc-400">
-          <Clock className="w-3.5 h-3.5 text-amber-500 mr-1" />
+        {/* Seconds Duration Selector: 15s, 30s, 60s, 120s + Custom typed seconds */}
+        <div className="flex items-center gap-1.5 text-xs font-bold text-zinc-500 dark:text-zinc-400 flex-wrap">
+          <Clock className="w-3.5 h-3.5 text-amber-500 mr-0.5" />
           {[15, 30, 60, 120].map((sec) => (
             <button
               key={sec}
               type="button"
               onClick={() => {
                 setDurationSeconds(sec);
+                setCustomSecInput("");
                 setRemainingSeconds(sec);
                 resetTest();
               }}
               className={`px-2.5 py-1 rounded-lg transition-colors cursor-pointer ${
-                durationSeconds === sec
+                durationSeconds === sec && !customSecInput
                   ? "text-amber-600 dark:text-amber-400 bg-amber-400/20 border border-amber-400/40 font-extrabold"
                   : "hover:text-zinc-900 dark:hover:text-white"
               }`}
@@ -400,6 +402,37 @@ export default function TypingFloor({
               {sec}s
             </button>
           ))}
+
+          {/* Custom typed seconds input */}
+          <div className="flex items-center gap-1 pl-1 border-l border-zinc-200 dark:border-zinc-700">
+            <span className="text-[10px] text-zinc-400 font-semibold uppercase tracking-wider">
+              Custom:
+            </span>
+            <input
+              type="number"
+              min="5"
+              max="600"
+              value={customSecInput}
+              onChange={(e) => {
+                const val = e.target.value;
+                setCustomSecInput(val);
+                const parsed = parseInt(val, 10);
+                if (!isNaN(parsed) && parsed >= 5 && parsed <= 600) {
+                  setDurationSeconds(parsed);
+                  setRemainingSeconds(parsed);
+                  resetTest();
+                }
+              }}
+              placeholder="Secs"
+              className={`w-14 px-2 py-1 text-xs rounded-lg text-center font-mono font-bold bg-zinc-100 dark:bg-zinc-900 border focus:outline-none transition-colors ${
+                customSecInput && ![15, 30, 60, 120].includes(durationSeconds)
+                  ? "border-amber-400 text-amber-500 bg-amber-400/10"
+                  : "border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-white focus:border-amber-400"
+              }`}
+              title="Type custom test duration in seconds (5-600s)"
+            />
+            <span className="text-[11px] text-zinc-400 font-bold">s</span>
+          </div>
         </div>
 
         {/* Audio switch & Fullscreen floor toggle */}
