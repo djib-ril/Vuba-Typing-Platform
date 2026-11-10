@@ -270,12 +270,10 @@ export default function AdminPanel({
     }
 
     const { data: authData } = await supabase.auth.getUser();
-    const adminSenderName = `Admin (${currentUserName || "Admin"})`;
 
     const { error } = await supabase.from("notifications").insert({
       user_id: target.id,
       sender_id: currentUserId || authData?.user?.id || null,
-      sender_name: adminSenderName,
       title: `Direct Admin Directive from ${currentUserName || "Admin"}`,
       message: notificationMsg,
       is_read: false,

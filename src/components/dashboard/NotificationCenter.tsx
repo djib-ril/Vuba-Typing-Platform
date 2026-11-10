@@ -14,6 +14,7 @@ import {
   User,
   AlertCircle,
   Mail,
+  Trash2,
 } from "lucide-react";
 import { supabase } from "@/src/lib/supabase";
 
@@ -41,6 +42,7 @@ interface NotificationCenterProps {
   currentUserId?: string;
   currentUserName?: string;
   onRefreshNotifications?: () => void;
+  onDeleteNotification?: (id: string) => Promise<void> | void;
 }
 
 export default function NotificationCenter({
@@ -50,6 +52,7 @@ export default function NotificationCenter({
   currentUserId,
   currentUserName = "Typist",
   onRefreshNotifications,
+  onDeleteNotification,
 }: NotificationCenterProps) {
   const [activeTab, setActiveTab] = useState<"inbox" | "compose">("inbox");
 
@@ -105,7 +108,6 @@ export default function NotificationCenter({
       const { error } = await supabase.from("notifications").insert({
         user_id: selectedRecipient.id,
         sender_id: currentUserId || null,
-        sender_name: currentUserName,
         title: `Direct Message from ${currentUserName}`,
         message: messageText.trim(),
         is_read: false,
@@ -341,79 +343,108 @@ export default function NotificationCenter({
               </p>
             </div>
           ) : (
-            notifications.map((notif) => (
-              <div
-                key={notif.id}
-                className={`p-5 rounded-2xl border transition-all ${
-                  notif.isRead
-                    ? "bg-white dark:bg-[#0c141a] border-zinc-200 dark:border-zinc-800 opacity-85"
-                    : "bg-emerald-50/60 dark:bg-emerald-950/20 border-emerald-500/40 shadow-sm"
-                }`}
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex items-start gap-3">
-                    <div
-                      className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${
-                        notif.type === "achievement"
-                          ? "bg-amber-400 text-zinc-950 shadow-md shadow-amber-400/20"
-                          : notif.type === "admin"
-                          ? "bg-red-500 text-white shadow-md shadow-red-500/20"
-                          : "bg-emerald-600 text-white shadow-md shadow-emerald-600/20"
-                      }`}
-                    >
-                      {notif.type === "achievement" ? (
-                        <Crown className="w-5 h-5" />
-                      ) : notif.type === "admin" ? (
-                        <ShieldCheck className="w-5 h-5" />
-                      ) : (
-                        <MessageSquare className="w-5 h-5" />
-                      )}
-                    </div>
+            notifications.map((notif) => {
+              const isFormFillingMessage =
+                notif.type === "achievement" ||
+                notif.title?.toLowerCase().includes("top 3") ||
+                notif.title?.toLowerCase().includes("form") ||
+                notif.message?.toLowerCase().includes("fill form") ||
+                notif.message?.toLowerCase().includes("who's the best");
 
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-sm text-zinc-900 dark:text-white">
-                          {notif.title}
-                        </span>
-                        {!notif.isRead && (
-                          <span className="px-2 py-0.2 rounded-full text-[9px] font-black uppercase bg-emerald-500 text-white">
-                            New
-                          </span>
+              return (
+                <div
+                  key={notif.id}
+                  className={`p-5 rounded-2xl border transition-all ${
+                    notif.isRead
+                      ? "bg-white dark:bg-[#0c141a] border-zinc-200 dark:border-zinc-800 opacity-85"
+                      : "bg-emerald-50/60 dark:bg-emerald-950/20 border-emerald-500/40 shadow-sm"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex items-start gap-3">
+                      <div
+                        className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                          isFormFillingMessage
+                            ? "bg-amber-400 text-zinc-950 shadow-md shadow-amber-400/20"
+                            : notif.type === "admin"
+                            ? "bg-red-500 text-white shadow-md shadow-red-500/20"
+                            : "bg-emerald-600 text-white shadow-md shadow-emerald-600/20"
+                        }`}
+                      >
+                        {isFormFillingMessage ? (
+                          <Crown className="w-5 h-5" />
+                        ) : notif.type === "admin" ? (
+                          <ShieldCheck className="w-5 h-5" />
+                        ) : (
+                          <MessageSquare className="w-5 h-5" />
                         )}
                       </div>
-                      <p className="text-xs text-zinc-700 dark:text-zinc-300 leading-relaxed whitespace-pre-wrap">
-                        {notif.message}
-                      </p>
-                      <span className="block text-[10px] text-zinc-400 font-medium mt-1">
-                        From <strong className="text-zinc-700 dark:text-zinc-300">{notif.sender}</strong> • {notif.date}
-                      </span>
+
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-sm text-zinc-900 dark:text-white">
+                            {notif.title}
+                          </span>
+                          {!notif.isRead && (
+                            <span className="px-2 py-0.2 rounded-full text-[9px] font-black uppercase bg-emerald-500 text-white">
+                              New
+                            </span>
+                          )}
+                          {isFormFillingMessage && (
+                            <span className="px-2 py-0.2 rounded-full text-[9px] font-bold uppercase bg-amber-400/20 text-amber-600 dark:text-amber-400 border border-amber-400/30">
+                              Official
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-zinc-700 dark:text-zinc-300 leading-relaxed whitespace-pre-wrap">
+                          {notif.message}
+                        </p>
+                        <span className="block text-[10px] text-zinc-400 font-medium mt-1">
+                          From <strong className="text-zinc-700 dark:text-zinc-300">{notif.sender}</strong> • {notif.date}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col items-end gap-2 flex-shrink-0">
+                      <div className="flex items-center gap-1.5">
+                        {isFormFillingMessage ? (
+                          <button
+                            type="button"
+                            onClick={onOpenTop3Form}
+                            className="px-3 py-1.5 rounded-xl text-xs font-bold text-zinc-950 bg-amber-400 hover:bg-amber-300 transition-colors cursor-pointer shadow-sm flex items-center gap-1"
+                          >
+                            <span>Fill Form</span>
+                            <ExternalLink className="w-3 h-3" />
+                          </button>
+                        ) : (
+                          onDeleteNotification && (
+                            <button
+                              type="button"
+                              onClick={() => onDeleteNotification(notif.id)}
+                              className="p-1.5 rounded-xl text-zinc-400 hover:text-red-500 hover:bg-red-500/10 transition-colors cursor-pointer"
+                              title="Delete this message"
+                              aria-label="Delete message"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )
+                        )}
+                      </div>
+
+                      {!notif.isRead && (
+                        <button
+                          type="button"
+                          onClick={() => onMarkRead(notif.id)}
+                          className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer"
+                        >
+                          Mark as Read
+                        </button>
+                      )}
                     </div>
                   </div>
-
-                  <div className="flex flex-col items-end gap-2 flex-shrink-0">
-                    {notif.type === "achievement" && (
-                      <button
-                        type="button"
-                        onClick={onOpenTop3Form}
-                        className="px-3 py-1.5 rounded-xl text-xs font-bold text-zinc-950 bg-amber-400 hover:bg-amber-300 transition-colors cursor-pointer shadow-sm flex items-center gap-1"
-                      >
-                        <span>Fill Form</span>
-                        <ExternalLink className="w-3 h-3" />
-                      </button>
-                    )}
-                    {!notif.isRead && (
-                      <button
-                        type="button"
-                        onClick={() => onMarkRead(notif.id)}
-                        className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer"
-                      >
-                        Mark as Read
-                      </button>
-                    )}
-                  </div>
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       )}

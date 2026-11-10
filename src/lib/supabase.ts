@@ -25,38 +25,52 @@ export const ADMIN_EMAIL = "mugishadjibril2020@gmail.com";
 
 // Every signed-in user must have a profiles row so the admin panel and
 // leaderboards can see them. Safe to call on every login: existing rows are
-// left untouched.
+// left untouched (roles and typing levels are strictly preserved).
 export async function ensureProfile(user: {
   id: string;
   email?: string | null;
   user_metadata?: Record<string, any> | null;
 }) {
-  const email = user.email || "";
+  const email = (user.email || "").trim().toLowerCase();
   const meta = user.user_metadata || {};
   const fullName =
     meta.full_name || meta.name || email.split("@")[0] || "Typist";
   const avatar = meta.avatar_url || meta.picture || null;
 
-  const { error } = await supabase.from("profiles").upsert(
-    {
-      id: user.id,
-      email,
-      full_name: fullName,
-      avatar_url: avatar,
-      role: email === ADMIN_EMAIL ? "admin" : "user",
-      typing_level: "Beginner",
-    },
-    { onConflict: "id" }
-  );
+  try {
+    // Check if profile row already exists to avoid resetting role or custom stats
+    const { data: existing, error: fetchErr } = await supabase
+      .from("profiles")
+      .select("id, role, typing_level")
+      .eq("id", user.id)
+      .maybeSingle();
 
-  if (!error && email === ADMIN_EMAIL) {
-    await supabase.from("profiles").update({ role: "admin" }).eq("id", user.id);
+    if (!existing) {
+      const { error: insertErr } = await supabase.from("profiles").insert({
+        id: user.id,
+        email,
+        full_name: fullName,
+        avatar_url: avatar,
+        role: email === ADMIN_EMAIL ? "admin" : "user",
+        typing_level: "Beginner",
+      });
+      if (insertErr) {
+        console.warn("ensureProfile insert error:", insertErr.message);
+      }
+      return insertErr;
+    } else {
+      // Existing profile: Guarantee admin email gets admin role if not already
+      if (email === ADMIN_EMAIL && existing.role !== "admin") {
+        await supabase
+          .from("profiles")
+          .update({ role: "admin" })
+          .eq("id", user.id);
+      }
+    }
+  } catch (err: any) {
+    console.warn("ensureProfile exception:", err?.message);
   }
-
-  if (error) {
-    console.warn("ensureProfile:", error.message);
-  }
-  return error;
+  return null;
 }
 
 export interface Profile {

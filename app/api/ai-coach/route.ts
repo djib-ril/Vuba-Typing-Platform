@@ -11,7 +11,7 @@ export async function POST(request: Request) {
 
     const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
 
-    // 1. If Gemini API key is configured, use Gemini 2.5 Flash for state-of-the-art responses
+    // 1. If Gemini API key is configured, use Gemini API for state-of-the-art responses
     if (apiKey) {
       try {
         const systemPrompt = `You are the master typing coach on the VubaTrustTyping platform, developed by Djibril Mugisha.
@@ -20,36 +20,41 @@ Cover ergonomics, touch-typing anchor nubs, finger reach, word-shape chunking, m
 Tailor advice to the user's query directly. Keep responses well-structured, actionable, and engaging without repeating generic disclaimers.
 User's Current Stats if provided: Highest WPM: ${stats?.highestWpm || "N/A"}, Accuracy: ${stats?.avgAccuracy || "N/A"}%.`;
 
-        const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              contents: [
-                {
-                  role: "user",
-                  parts: [
+        const modelsToTry = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+        for (const model of modelsToTry) {
+          try {
+            const res = await fetch(
+              `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  contents: [
                     {
-                      text: `${systemPrompt}\n\nUser Question: ${query}`,
+                      role: "user",
+                      parts: [
+                        {
+                          text: `${systemPrompt}\n\nUser Question: ${query}`,
+                        },
+                      ],
                     },
                   ],
-                },
-              ],
-              generationConfig: {
-                temperature: 0.7,
-                maxOutputTokens: 800,
-              },
-            }),
-          }
-        );
+                  generationConfig: {
+                    temperature: 0.7,
+                    maxOutputTokens: 800,
+                  },
+                }),
+              }
+            );
 
-        if (res.ok) {
-          const data = await res.json();
-          const candidateText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (candidateText) {
-            return NextResponse.json({ reply: candidateText });
-          }
+            if (res.ok) {
+              const data = await res.json();
+              const candidateText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+              if (candidateText) {
+                return NextResponse.json({ reply: candidateText });
+              }
+            }
+          } catch {}
         }
       } catch (err) {
         console.warn("Gemini API call error, falling back to local engine:", err);

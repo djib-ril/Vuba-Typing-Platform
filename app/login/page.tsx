@@ -30,11 +30,23 @@ export default function LoginPage() {
     async function checkSession() {
       const { data } = await supabase.auth.getSession();
       if (data?.session?.user) {
-        router.push("/dashboard");
+        window.location.href = "/dashboard";
       }
     }
     checkSession();
-  }, [router]);
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        window.location.href = "/dashboard";
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
 
   const handleOAuthSignIn = async (provider: "google" | "github") => {
     try {
@@ -55,7 +67,13 @@ export default function LoginPage() {
 
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email || !password) return;
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanPassword = password.trim();
+
+    if (!cleanEmail || !cleanPassword) {
+      setErrorMsg("Please enter both your email address and password.");
+      return;
+    }
 
     try {
       setLoading(true);
@@ -63,29 +81,43 @@ export default function LoginPage() {
 
       if (mode === "signin") {
         const { data, error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
+          email: cleanEmail,
+          password: cleanPassword,
         });
 
-        if (error) throw error;
+        if (error) {
+          const msg = error.message?.toLowerCase() || "";
+          if (msg.includes("invalid login credentials") || msg.includes("invalid_grant")) {
+            setErrorMsg("Invalid email or password. Please double-check your credentials or create an account.");
+            setLoading(false);
+            return;
+          }
+          if (msg.includes("email not confirmed") || msg.includes("not confirmed")) {
+            setErrorMsg("Email not confirmed. Please check your email inbox to confirm your account before signing in.");
+            setLoading(false);
+            return;
+          }
+          throw error;
+        }
 
-        // Make sure a profile row exists (safety net for legacy accounts)
+        // Make sure a profile row exists in Supabase
         if (data.user) {
           await ensureProfile(data.user);
         }
 
-        setSuccessMsg("Welcome back! Loading your dashboard...");
+        setSuccessMsg("Welcome back! Redirecting to your dashboard...");
         setTimeout(() => {
-          router.push("/dashboard");
-        }, 800);
+          window.location.href = "/dashboard";
+        }, 500);
       } else {
         // Sign Up
+        const cleanName = (fullName || cleanEmail.split("@")[0] || "Typist").trim();
         const { data, error } = await supabase.auth.signUp({
-          email,
-          password,
+          email: cleanEmail,
+          password: cleanPassword,
           options: {
             data: {
-              full_name: fullName || email.split("@")[0],
+              full_name: cleanName,
             },
           },
         });
@@ -115,7 +147,7 @@ export default function LoginPage() {
           return;
         }
 
-        // Create the profile entry (works for admin + regular users)
+        // Create the profile entry in Supabase
         if (data.user) {
           await ensureProfile(data.user);
         }
@@ -123,7 +155,7 @@ export default function LoginPage() {
         // When email confirmation is required, there is no session yet
         if (data.user && !data.session) {
           setSuccessMsg(
-            "Account created! Please check your inbox and confirm your email before signing in."
+            "Account created! Please check your email inbox to confirm your account, then sign in."
           );
           setLoading(false);
           return;
@@ -131,8 +163,8 @@ export default function LoginPage() {
 
         setSuccessMsg("Account created successfully! Loading your dashboard...");
         setTimeout(() => {
-          router.push("/dashboard");
-        }, 800);
+          window.location.href = "/dashboard";
+        }, 500);
       }
     } catch (err: any) {
       const msg = err.message?.toLowerCase() || "";
@@ -142,6 +174,13 @@ export default function LoginPage() {
         msg.includes("user_already_exists")
       ) {
         setErrorMsg("The account already exists. Please sign in instead.");
+      } else if (
+        msg.includes("invalid login credentials") ||
+        msg.includes("invalid_grant")
+      ) {
+        setErrorMsg("Invalid email or password. Please check your credentials or create an account.");
+      } else if (msg.includes("email not confirmed")) {
+        setErrorMsg("Email not confirmed. Please check your inbox for the confirmation link.");
       } else {
         setErrorMsg(err.message || "Authentication error occurred.");
       }

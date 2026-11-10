@@ -21,11 +21,15 @@ import {
   User as UserIcon,
   Crown,
   Maximize2,
+  Minimize2,
   CheckCircle,
   BookOpen,
   Bot,
   Mail,
   AlertCircle,
+  Send,
+  Loader2,
+  Trash2,
 } from "lucide-react";
 import {
   supabase,
@@ -44,7 +48,6 @@ import NotificationCenter, {
   DashboardNotification,
 } from "@/src/components/dashboard/NotificationCenter";
 import AdminPanel from "@/src/components/dashboard/AdminPanel";
-import AiCoachWidget from "@/src/components/landing/AiCoachWidget";
 import MusicPlayer from "@/src/components/dashboard/MusicPlayer";
 
 export default function DashboardPage() {
@@ -68,7 +71,6 @@ export default function DashboardPage() {
   >("floor");
 
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [isCoachOpen, setIsCoachOpen] = useState(false);
   const [showTop3Modal, setShowTop3Modal] = useState(false);
 
   // Unread messages center popup on initial sign in
@@ -103,7 +105,96 @@ export default function DashboardPage() {
   const [top3SubmittedSuccess, setTop3SubmittedSuccess] = useState(false);
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
 
-  // Notifications: server-side messages from the admin, loaded per user
+  // Dedicated AI Typing Coach State
+  const [coachInput, setCoachInput] = useState("");
+  const [coachIsTyping, setCoachIsTyping] = useState(false);
+  const [coachIsMaximized, setCoachIsMaximized] = useState(false);
+  const [coachMessages, setCoachMessages] = useState<
+    Array<{ id: string; sender: "ai" | "user"; text: string; timestamp: string }>
+  >([
+    {
+      id: "msg-coach-init",
+      sender: "ai",
+      text: "👋 Hello! I am your VubaTrust AI Master Typing Coach. Ask me anything about breaking speed plateaus, biomechanical finger reach, keyboard switch selection, or race strategies. How can I assist your typing journey today?",
+      timestamp: "Just now",
+    },
+  ]);
+  const coachMessagesEndRef = React.useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    try {
+      coachMessagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    } catch {}
+  }, [coachMessages, coachIsTyping]);
+
+  const handleSendCoachMessage = async (queryText?: string) => {
+    const text = queryText || coachInput.trim();
+    if (!text) return;
+
+    const timeStr = new Date().toLocaleTimeString(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+    const userMsg = {
+      id: `user-${Date.now()}`,
+      sender: "user" as const,
+      text,
+      timestamp: timeStr,
+    };
+
+    setCoachMessages((prev) => [...prev, userMsg]);
+    setCoachInput("");
+    setCoachIsTyping(true);
+
+    try {
+      const res = await fetch("/api/ai-coach", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: text,
+          stats: {
+            highestWpm,
+            avgWpm,
+            avgAccuracy,
+            testsCount,
+          },
+        }),
+      });
+
+      const data = await res.json();
+      const reply =
+        data.reply ||
+        "Focus on floating your wrists and locking in 98% accuracy!";
+
+      setCoachMessages((prev) => [
+        ...prev,
+        {
+          id: `ai-${Date.now()}`,
+          sender: "ai" as const,
+          text: reply,
+          timestamp: new Date().toLocaleTimeString(undefined, {
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+        },
+      ]);
+    } catch {
+      setCoachMessages((prev) => [
+        ...prev,
+        {
+          id: `ai-${Date.now()}`,
+          sender: "ai" as const,
+          text: "Anchor your index fingers on the F and J nubs, keep wrists floating, and aim for rhythmic flow!",
+          timestamp: "Just now",
+        },
+      ]);
+    } finally {
+      setCoachIsTyping(false);
+    }
+  };
+
+  // Notifications: server-side messages loaded from Supabase per user
   const [notifications, setNotifications] = useState<DashboardNotification[]>([
     {
       id: "n-1",
@@ -137,22 +228,29 @@ export default function DashboardPage() {
 
     if (data) {
       const serverNotes: DashboardNotification[] = data.map((n: any) => {
-        let senderName = n.sender_name;
-        if (!senderName) {
-          if (n.title && n.title.includes("from ")) {
-            senderName = n.title.replace(/^.*from\s+/i, "");
-          } else {
-            senderName = "Admin";
-          }
+        let senderName = "Admin";
+        if (n.title && n.title.includes("from ")) {
+          senderName = n.title.replace(/^.*from\s+/i, "");
+        } else if (n.title?.includes("Admin")) {
+          senderName = "Admin (Djibril Mugisha)";
         }
+
+        const isAchievement =
+          n.type === "achievement" ||
+          n.title?.toLowerCase().includes("top 3") ||
+          n.message?.toLowerCase().includes("top 3") ||
+          n.message?.toLowerCase().includes("fill form");
+
         return {
           id: n.id,
           sender: senderName,
           title: n.title || "Message",
           message: n.message,
-          type: "admin" as const,
+          type: isAchievement ? ("achievement" as const) : ("admin" as const),
           isRead: !!n.is_read,
-          date: new Date(n.created_at).toLocaleDateString(),
+          date: n.created_at
+            ? new Date(n.created_at).toLocaleDateString()
+            : "Recent",
         };
       });
 
@@ -176,6 +274,15 @@ export default function DashboardPage() {
       });
     }
   }, []);
+
+  const handleDeleteNotification = async (id: string) => {
+    try {
+      await supabase.from("notifications").delete().eq("id", id);
+      setNotifications((prev) => prev.filter((n) => n.id !== id));
+    } catch (err: any) {
+      console.warn("handleDeleteNotification error:", err?.message);
+    }
+  };
 
   // Load auth session and historical user stats
   useEffect(() => {
@@ -669,36 +776,24 @@ if (!isMounted) {
           </div>
         </div>
 
-        {/* Sidebar Footer: AI Coach & Theme Switch */}
-        <div className="pt-4 border-t border-zinc-200 dark:border-zinc-800 space-y-2">
-          {/* AI Coach Button */}
+        {/* Sidebar Footer: Theme Switch */}
+        <div className="pt-4 border-t border-zinc-200 dark:border-zinc-800">
+          {/* Theme Toggle */}
           <button
             type="button"
-            onClick={() => setIsCoachOpen(true)}
-            className="w-full flex items-center gap-2.5 px-3.5 py-2 rounded-xl text-xs font-bold text-amber-700 dark:text-amber-300 bg-amber-400/10 hover:bg-amber-400/20 border border-amber-400/30 transition-colors cursor-pointer"
+            onClick={toggleTheme}
+            className="w-full flex items-center justify-between px-3.5 py-2 rounded-xl text-xs font-semibold text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer transition-colors"
+            title="Toggle theme"
           >
-            <Sparkles className="w-4 h-4 text-amber-500" />
-            <span>AI Typing Coach</span>
+            <div className="flex items-center gap-2.5">
+              {theme === "dark" ? (
+                <Sun className="w-4 h-4 text-amber-400" />
+              ) : (
+                <Moon className="w-4 h-4 text-emerald-600" />
+              )}
+              <span>{theme === "dark" ? "Light Mode" : "Dark Mode"}</span>
+            </div>
           </button>
-
-          {/* Theme Toggle */}
-          <div className="pt-1">
-            <button
-              type="button"
-              onClick={toggleTheme}
-              className="w-full flex items-center justify-between px-3.5 py-2 rounded-xl text-xs font-semibold text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer transition-colors"
-              title="Toggle theme"
-            >
-              <div className="flex items-center gap-2.5">
-                {theme === "dark" ? (
-                  <Sun className="w-4 h-4 text-amber-400" />
-                ) : (
-                  <Moon className="w-4 h-4 text-emerald-600" />
-                )}
-                <span>{theme === "dark" ? "Light Mode" : "Dark Mode"}</span>
-              </div>
-            </button>
-          </div>
         </div>
       </aside>
 
@@ -800,103 +895,189 @@ if (!isMounted) {
           {activeTab === "leaderboard" && <LeaderboardView />}
 
           {activeTab === "coach" && (
-            <div className="space-y-6">
+            <div
+              className={`space-y-6 transition-all duration-300 ${
+                coachIsMaximized
+                  ? "fixed inset-2 sm:inset-6 z-50 bg-white dark:bg-[#090e13] p-4 sm:p-6 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-2xl flex flex-col overflow-hidden"
+                  : ""
+              }`}
+            >
+              {/* Header Banner */}
               <div className="p-6 rounded-3xl bg-gradient-to-r from-amber-500/20 via-zinc-900 to-[#121c24] border border-amber-400/30 text-white flex flex-col md:flex-row items-center justify-between gap-4">
                 <div className="space-y-1">
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-400/20 text-amber-300 text-xs font-bold uppercase tracking-wider border border-amber-400/30">
-                    <Sparkles className="w-3.5 h-3.5" />
-                    <span>Personalized Biomechanical AI Coach</span>
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-400/20 text-amber-300 text-xs font-bold uppercase tracking-wider border border-amber-400/30">
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Vuba AI Master Coach</span>
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                      Live Biomechanical Engine
+                    </span>
+                  </div>
                   <h2 className="text-xl sm:text-2xl font-black">
-                    Interactive Typing Speed & Technique Master
+                    Interactive Speed & Technique Master
                   </h2>
                   <p className="text-xs text-zinc-300 max-w-xl">
                     Get instantaneous feedback on breaking speed plateaus, floating wrist posture, home-row anchor points, and mechanical switch performance tailored to your metrics.
                   </p>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => setIsCoachOpen(true)}
-                  className="px-5 py-3 rounded-2xl bg-amber-400 hover:bg-amber-300 text-zinc-950 font-black text-xs shadow-lg shadow-amber-400/20 transition-all flex items-center gap-2 cursor-pointer flex-shrink-0"
-                >
-                  <Bot className="w-4 h-4" />
-                  <span>Launch Floating Widget</span>
-                </button>
+                <div className="flex items-center gap-3">
+                  <div className="hidden sm:flex items-center gap-2 px-3 py-2 rounded-2xl bg-black/40 border border-white/10 text-xs">
+                    <span className="text-zinc-400">Peak:</span>
+                    <strong className="text-emerald-400">{highestWpm} WPM</strong>
+                    <span className="text-zinc-600">|</span>
+                    <span className="text-zinc-400">Acc:</span>
+                    <strong className="text-amber-400">{avgAccuracy}%</strong>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setCoachIsMaximized(!coachIsMaximized)}
+                    className="p-2.5 rounded-2xl bg-zinc-800/80 hover:bg-zinc-700 text-white border border-zinc-700 transition-colors cursor-pointer flex items-center gap-1.5 text-xs font-bold"
+                    title={coachIsMaximized ? "Exit Full Screen" : "Maximize Full Screen"}
+                  >
+                    {coachIsMaximized ? (
+                      <>
+                        <Minimize2 className="w-4 h-4" />
+                        <span>Compact</span>
+                      </>
+                    ) : (
+                      <>
+                        <Maximize2 className="w-4 h-4" />
+                        <span>Full Screen</span>
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
 
-              {/* Master AI Coaching Curated Modules & Live Q&A */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="md:col-span-1 p-6 rounded-3xl bg-white dark:bg-[#0c141a] border border-zinc-200 dark:border-zinc-800 space-y-4">
-                  <h3 className="font-bold text-sm text-zinc-900 dark:text-white flex items-center gap-2">
-                    <BookOpen className="w-4 h-4 text-emerald-500" />
-                    <span>Core Drill Topics</span>
-                  </h3>
-                  <div className="space-y-2">
+              {/* Main Coach Workspace: Grid of Core Topics + Active Chat */}
+              <div
+                className={`grid grid-cols-1 md:grid-cols-3 gap-6 ${
+                  coachIsMaximized ? "flex-1 min-h-0 overflow-hidden" : ""
+                }`}
+              >
+                {/* Core Drill Topics */}
+                <div
+                  className={`md:col-span-1 p-5 rounded-3xl bg-white dark:bg-[#0c141a] border border-zinc-200 dark:border-zinc-800 space-y-4 flex flex-col ${
+                    coachIsMaximized ? "overflow-y-auto" : ""
+                  }`}
+                >
+                  <div className="flex items-center justify-between pb-2 border-b border-zinc-200 dark:border-zinc-800">
+                    <h3 className="font-bold text-xs uppercase tracking-wider text-zinc-700 dark:text-zinc-300 flex items-center gap-2">
+                      <BookOpen className="w-4 h-4 text-emerald-500" />
+                      <span>Curated Master Topics</span>
+                    </h3>
+                    <span className="text-[10px] text-zinc-400 font-semibold">1-Click Ask</span>
+                  </div>
+
+                  <div className="space-y-2 flex-1">
                     {[
-                      { title: "Breaking Past 80 WPM", query: "How do I break through the 80 WPM speed plateau?" },
-                      { title: "Home Row Anchor Nubs", query: "What is the optimal finger placement on the home row?" },
-                      { title: "The 98% Accuracy Rule", query: "How much does a backspace error penalize my net WPM?" },
-                      { title: "Switch Types & Latency", query: "Which keyboard switches are best for typing speed?" },
-                      { title: "Wrist Fatigue & Ergonomics", query: "How can I prevent wrist fatigue and tendon pain while typing?" },
-                      { title: "Code Syntax Touch Typing", query: "How do I learn touch typing on the number row and coding symbols?" },
+                      { title: "🚀 Breaking Past 80 WPM", query: "How do I break through the 80 WPM speed plateau?" },
+                      { title: "🖐️ Home Row Anchor Nubs", query: "What is the optimal finger placement on the home row?" },
+                      { title: "⚡ The 98% Accuracy Rule", query: "How much does a backspace error penalize my net WPM?" },
+                      { title: "⌨️ Switch Types & Latency", query: "Which keyboard switches are best for typing speed?" },
+                      { title: "🧘 Wrist Fatigue & Ergonomics", query: "How can I prevent wrist fatigue and tendon pain while typing?" },
+                      { title: "💻 Code Syntax Touch Typing", query: "How do I learn touch typing on the number row and coding symbols?" },
                     ].map((topic, i) => (
                       <button
                         key={i}
                         type="button"
-                        onClick={() => {
-                          setIsCoachOpen(true);
-                        }}
-                        className="w-full text-left p-3 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 hover:bg-amber-400/10 hover:border-amber-400/30 border border-zinc-200/80 dark:border-zinc-800 text-xs font-semibold text-zinc-800 dark:text-zinc-200 transition-all cursor-pointer flex items-center justify-between"
+                        onClick={() => handleSendCoachMessage(topic.query)}
+                        className="w-full text-left p-3 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 hover:bg-amber-400/10 hover:border-amber-400/30 border border-zinc-200/80 dark:border-zinc-800 text-xs font-semibold text-zinc-800 dark:text-zinc-200 transition-all cursor-pointer flex items-center justify-between group"
                       >
                         <span>{topic.title}</span>
-                        <span className="text-amber-500 font-bold">Ask →</span>
+                        <span className="text-amber-500 font-bold opacity-0 group-hover:opacity-100 transition-opacity">
+                          Ask →
+                        </span>
                       </button>
                     ))}
                   </div>
-                </div>
 
-                <div className="md:col-span-2 p-6 rounded-3xl bg-white dark:bg-[#0c141a] border border-zinc-200 dark:border-zinc-800 space-y-4 flex flex-col justify-between">
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <h3 className="font-bold text-sm text-zinc-900 dark:text-white flex items-center gap-2">
-                        <Bot className="w-4 h-4 text-amber-500" />
-                        <span>Real-Time Biomechanical Analysis</span>
-                      </h3>
-                      <span className="text-[11px] font-bold text-emerald-500 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20">
-                        Live Engine Connected
-                      </span>
+                  {/* Real-time stats box */}
+                  <div className="p-3.5 rounded-2xl bg-zinc-100/70 dark:bg-zinc-900/50 border border-zinc-200/80 dark:border-zinc-800 text-xs space-y-1">
+                    <div className="font-bold text-zinc-900 dark:text-white flex items-center justify-between text-[11px]">
+                      <span>Biomechanical Profile</span>
+                      <span className="text-emerald-500">{userLevel}</span>
                     </div>
-
-                    <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-zinc-800 text-xs leading-relaxed text-zinc-700 dark:text-zinc-300 space-y-2">
-                      <p className="font-bold text-zinc-900 dark:text-white">
-                        Your Personalized Prescription based on {testsCount} tests recorded:
-                      </p>
-                      <ul className="list-disc list-inside space-y-1 text-zinc-600 dark:text-zinc-400">
-                        <li>
-                          Current Peak: <strong>{highestWpm} WPM</strong> | Average: <strong>{avgWpm} WPM</strong>
-                        </li>
-                        <li>
-                          Accuracy baseline: <strong>{avgAccuracy}%</strong>. Keep error recovery under 300ms by floating wrists.
-                        </li>
-                        <li>
-                          Recommended next drill: Practice word chunking with high-frequency n-grams on The Typing Floor.
-                        </li>
-                      </ul>
+                    <div className="text-[10px] text-zinc-500 dark:text-zinc-400">
+                      Based on {testsCount} completed typing tests.
                     </div>
                   </div>
+                </div>
 
-                  <div className="pt-4 border-t border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-3">
-                    <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                      Click below to chat freely with the AI Coach in full screen or compact view:
-                    </span>
+                {/* Direct Interactive AI Chat Room */}
+                <div
+                  className={`md:col-span-2 rounded-3xl bg-white dark:bg-[#0c141a] border border-zinc-200 dark:border-zinc-800 flex flex-col overflow-hidden ${
+                    coachIsMaximized ? "min-h-0" : "h-[620px]"
+                  }`}
+                >
+                  {/* Messages Flow */}
+                  <div className="flex-1 p-5 overflow-y-auto space-y-4 text-xs sm:text-sm">
+                    {coachMessages.map((m) => (
+                      <div
+                        key={m.id}
+                        className={`flex gap-3 ${
+                          m.sender === "user" ? "flex-row-reverse" : "flex-row"
+                        }`}
+                      >
+                        <div
+                          className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-xs font-bold ${
+                            m.sender === "user"
+                              ? "bg-emerald-600 text-white"
+                              : "bg-amber-400 text-zinc-950"
+                          }`}
+                        >
+                          {m.sender === "user" ? (
+                            <UserIcon className="w-4 h-4" />
+                          ) : (
+                            <Bot className="w-4 h-4" />
+                          )}
+                        </div>
+
+                        <div
+                          className={`p-4 rounded-2xl max-w-[85%] leading-relaxed ${
+                            m.sender === "user"
+                              ? "bg-emerald-600 text-white rounded-tr-none shadow-md"
+                              : "bg-zinc-100 dark:bg-zinc-900/90 text-zinc-800 dark:text-zinc-200 border border-zinc-200/80 dark:border-zinc-800 rounded-tl-none whitespace-pre-wrap"
+                          }`}
+                        >
+                          <p>{m.text}</p>
+                          <span className="block text-[9px] mt-1.5 opacity-60 text-right">
+                            {m.timestamp}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+
+                    {coachIsTyping && (
+                      <div className="flex items-center gap-2 text-zinc-400 text-xs italic p-2">
+                        <Loader2 className="w-4 h-4 text-amber-400 animate-spin" />
+                        <span>AI Master Coach is formulating personalized biomechanical advice...</span>
+                      </div>
+                    )}
+                    <div ref={coachMessagesEndRef} />
+                  </div>
+
+                  {/* Input Footer */}
+                  <div className="p-4 bg-zinc-50 dark:bg-zinc-950/40 border-t border-zinc-200 dark:border-zinc-800 flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={coachInput}
+                      onChange={(e) => setCoachInput(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && handleSendCoachMessage()}
+                      placeholder="Ask any question about typing speed, drills, ergonomics, or switches..."
+                      className="flex-1 px-4 py-3 text-xs sm:text-sm rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white focus:outline-none focus:border-amber-400"
+                    />
                     <button
                       type="button"
-                      onClick={() => setIsCoachOpen(true)}
-                      className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md shadow-emerald-600/20 cursor-pointer flex items-center gap-1.5"
+                      onClick={() => handleSendCoachMessage()}
+                      disabled={!coachInput.trim() || coachIsTyping}
+                      className="p-3 rounded-xl bg-amber-400 hover:bg-amber-300 disabled:opacity-50 text-zinc-950 font-bold transition-all hover:scale-105 cursor-pointer flex-shrink-0"
+                      title="Send message"
                     >
-                      <Sparkles className="w-3.5 h-3.5" />
-                      <span>Open Full AI Chat</span>
+                      <Send className="w-4 h-4" />
                     </button>
                   </div>
                 </div>
@@ -912,6 +1093,7 @@ if (!isMounted) {
               currentUserId={userId}
               currentUserName={userName}
               onRefreshNotifications={() => userId && loadNotifications(userId)}
+              onDeleteNotification={handleDeleteNotification}
             />
           )}
 
@@ -926,14 +1108,6 @@ if (!isMounted) {
           )}
         </main>
       </div>
-
-      {/* Embedded AI Coach Modal */}
-      <AiCoachWidget
-        isOpen={isCoachOpen}
-        onClose={() => setIsCoachOpen(false)}
-        onToggle={() => setIsCoachOpen((prev) => !prev)}
-        stats={{ highestWpm, avgWpm, avgAccuracy, testsCount }}
-      />
 
       {/* Ambient YouTube Slow Music Player Dock */}
       <MusicPlayer />

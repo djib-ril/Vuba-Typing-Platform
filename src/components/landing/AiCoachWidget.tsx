@@ -24,6 +24,7 @@ interface AiCoachWidgetProps {
   isOpen: boolean;
   onClose: () => void;
   onToggle: () => void;
+  hideFloatingTrigger?: boolean;
   stats?: {
     highestWpm?: number;
     avgWpm?: number;
@@ -52,6 +53,7 @@ export default function AiCoachWidget({
   isOpen,
   onClose,
   onToggle,
+  hideFloatingTrigger = false,
   stats,
 }: AiCoachWidgetProps) {
   const [isMaximized, setIsMaximized] = useState(false);
@@ -69,18 +71,22 @@ export default function AiCoachWidget({
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isTyping]);
+    try {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    } catch {}
+  }, [messages, isTyping, isOpen]);
 
   const handleSend = async (textToSend?: string) => {
     const text = textToSend || inputVal.trim();
     if (!text) return;
 
+    const timeStr = new Date().toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+
     const userMsg: Message = {
       id: `user-${Date.now()}`,
       sender: "user",
       text,
-      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      timestamp: timeStr,
     };
 
     setMessages((prev) => [...prev, userMsg]);
@@ -93,7 +99,12 @@ export default function AiCoachWidget({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: text,
-          stats,
+          stats: {
+            highestWpm: stats?.highestWpm || 0,
+            avgWpm: stats?.avgWpm || 0,
+            avgAccuracy: stats?.avgAccuracy || 100,
+            testsCount: stats?.testsCount || 0,
+          },
         }),
       });
 
@@ -106,7 +117,7 @@ export default function AiCoachWidget({
           id: `ai-${Date.now()}`,
           sender: "ai",
           text: reply,
-          timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          timestamp: new Date().toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }),
         },
       ]);
     } catch (err) {
@@ -126,25 +137,27 @@ export default function AiCoachWidget({
 
   return (
     <>
-      {/* Floating Trigger Button */}
-      <div className="fixed bottom-6 right-6 z-40">
-        <button
-          type="button"
-          onClick={onToggle}
-          aria-label="Open AI Typing Coach"
-          className="relative group flex items-center gap-2.5 px-4 py-3 rounded-full bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-500 text-zinc-950 font-bold shadow-xl shadow-amber-500/25 hover:shadow-amber-500/40 hover:scale-105 transition-all duration-200 cursor-pointer focus:outline-none"
-        >
-          <Sparkles className="w-5 h-5 animate-spin" style={{ animationDuration: "6s" }} />
-          <span className="hidden sm:inline text-xs font-black tracking-wide uppercase">
-            AI Typing Coach
-          </span>
-          {/* Notification pulse badge */}
-          <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-            <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-500 border-2 border-white dark:border-zinc-900" />
-          </span>
-        </button>
-      </div>
+      {/* Floating Trigger Button (Shown only if not hidden) */}
+      {!hideFloatingTrigger && (
+        <div className="fixed bottom-6 right-6 z-40">
+          <button
+            type="button"
+            onClick={onToggle}
+            aria-label="Open AI Typing Coach"
+            className="relative group flex items-center gap-2.5 px-4 py-3 rounded-full bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-500 text-zinc-950 font-bold shadow-xl shadow-amber-500/25 hover:shadow-amber-500/40 hover:scale-105 transition-all duration-200 cursor-pointer focus:outline-none"
+          >
+            <Sparkles className="w-5 h-5 animate-spin" style={{ animationDuration: "6s" }} />
+            <span className="hidden sm:inline text-xs font-black tracking-wide uppercase">
+              AI Typing Coach
+            </span>
+            {/* Notification pulse badge */}
+            <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-500 border-2 border-white dark:border-zinc-900" />
+            </span>
+          </button>
+        </div>
+      )}
 
       {/* Slide-over / Modal Chat Window */}
       {isOpen && (
